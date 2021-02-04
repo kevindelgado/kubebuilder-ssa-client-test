@@ -1,0 +1,7 @@
+domain: tutorial.kubebuilder.io
+repo: ssa-test.example.com/project
+resources:
+- group: batch
+  kind: CronJob
+  version: v1
+version: "2"
