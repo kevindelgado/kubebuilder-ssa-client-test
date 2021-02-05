@@ -91,6 +91,13 @@ func (r *CronJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// on deleted requests.
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	// kdelga: I think I need to create an apply config that I can update along the way.
+	// I don't think a builder gets generated for CRDs, so does that mean I should
+	// create a new CronJobApplyConfiguration and only update the fields that need to be changed?
+	// Why aren't the setters generated for the cronjob applyconfig?
+	//
+	//cronJobApplyConfig, err := ac.CronJob()
+	//cronJobApplyConfig := &ac.CronJobApplyConfiguration{}
 
 	/*
 		### 2: List all active jobs, and update the status
@@ -197,6 +204,10 @@ func (r *CronJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	}
 
+	// kdelga: update the applyConfig instead:
+	// cronJobApplyConfig.Status = &ac.CronJobStatus{}
+	// cronJobApplyConfig.Status.LastScheduleTime = &metav1.Time{Time: *mostRecentTime}
+
 	if mostRecentTime != nil {
 		cronJob.Status.LastScheduleTime = &metav1.Time{Time: *mostRecentTime}
 	} else {
@@ -209,6 +220,8 @@ func (r *CronJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			log.Error(err, "unable to make reference to active job", "job", activeJob)
 			continue
 		}
+		// kdelga:
+		// cronJobApplyConfig.Status.Active = append(cronJob.Status.Active, *jobRef)
 		cronJob.Status.Active = append(cronJob.Status.Active, *jobRef)
 	}
 
@@ -229,6 +242,16 @@ func (r *CronJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		The status subresource ignores changes to spec, so it's less likely to conflict
 		with any other updates, and can have separate permissions.
 	*/
+
+	// kdelga: use apply instead of update
+	// does applying just a status even make sense?
+	//
+	//owner := "controller"
+	//if err := r.Patch(ctx, cronJobApplyConfig, client.Apply, owner); err != nil {
+	//	log.Error(err, "unable to patch CronJob")
+	//	return ctrl.Result{}, err
+	//}
+
 	if err := r.Status().Update(ctx, &cronJob); err != nil {
 		log.Error(err, "unable to update CronJob status")
 		return ctrl.Result{}, err
@@ -482,6 +505,7 @@ func (r *CronJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// ...and create it on the cluster
+	// kdelga: TODO use Patch instead of Create
 	if err := r.Create(ctx, job); err != nil {
 		log.Error(err, "unable to create Job for CronJob", "job", job)
 		return ctrl.Result{}, err

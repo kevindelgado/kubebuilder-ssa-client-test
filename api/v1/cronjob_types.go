@@ -14,6 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+//go:generate controller-gen object crd paths="." output:dir="."
+// +groupName=batch.tutorial.kuebuilder.io
+// +versionName=v1
+//go:generate /usr/local/google/home/kevindelgado/code/controller-tools/cmd/controller-gen/controller-gen apply paths="./..."
+//go:generate /usr/local/google/home/kevindelgado/code/controller-tools/cmd/controller-gen/controller-gen object paths="./..."
 package v1
 
 import (
@@ -105,6 +110,7 @@ type CronJobStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:object:generate=true
 
 // CronJob is the Schema for the cronjobs API
 type CronJob struct {
