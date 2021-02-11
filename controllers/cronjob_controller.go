@@ -33,6 +33,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	batch "ssa-test.example.com/project/api/v1"
+	ac "ssa-test.example.com/project/api/v1/ac"
+	accore "ssa-test.example.com/project/api/v1/ac/core/v1"
 )
 
 // CronJobReconciler reconciles a CronJob object
@@ -96,8 +98,12 @@ func (r *CronJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// create a new CronJobApplyConfiguration and only update the fields that need to be changed?
 	// Why aren't the setters generated for the cronjob applyconfig?
 	//
-	//cronJobApplyConfig, err := ac.CronJob()
-	//cronJobApplyConfig := &ac.CronJobApplyConfiguration{}
+	cronJobApplyConfig := &ac.CronJobApplyConfiguration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      req.Name,
+			Namespace: "default",
+		},
+	}
 
 	/*
 		### 2: List all active jobs, and update the status
@@ -205,14 +211,16 @@ func (r *CronJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	// kdelga: update the applyConfig instead:
-	// cronJobApplyConfig.Status = &ac.CronJobStatus{}
-	// cronJobApplyConfig.Status.LastScheduleTime = &metav1.Time{Time: *mostRecentTime}
+	cronJobApplyConfig.Status = &ac.CronJobStatusApplyConfiguration{}
 
 	if mostRecentTime != nil {
+		cronJobApplyConfig.Status.LastScheduleTime = &metav1.Time{Time: *mostRecentTime}
 		cronJob.Status.LastScheduleTime = &metav1.Time{Time: *mostRecentTime}
 	} else {
+		cronJobApplyConfig.Status.LastScheduleTime = nil
 		cronJob.Status.LastScheduleTime = nil
 	}
+	cronJobApplyConfig.Status.Active = nil
 	cronJob.Status.Active = nil
 	for _, activeJob := range activeJobs {
 		jobRef, err := ref.GetReference(r.Scheme, activeJob)
@@ -220,9 +228,24 @@ func (r *CronJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			log.Error(err, "unable to make reference to active job", "job", activeJob)
 			continue
 		}
-		// kdelga:
-		// cronJobApplyConfig.Status.Active = append(cronJob.Status.Active, *jobRef)
 		cronJob.Status.Active = append(cronJob.Status.Active, *jobRef)
+		// kdelga:
+		active := cronJobApplyConfig.Status.Active
+		if active == nil {
+			tmp := []accore.ObjectReferenceApplyConfiguration{}
+			active = &tmp
+		}
+		objRefAC := &accore.ObjectReferenceApplyConfiguration{
+			Kind:            &jobRef.Kind,
+			Namespace:       &jobRef.Namespace,
+			Name:            &jobRef.Name,
+			UID:             &jobRef.UID,
+			APIVersion:      &jobRef.APIVersion,
+			ResourceVersion: &jobRef.ResourceVersion,
+			FieldPath:       &jobRef.FieldPath,
+		}
+		newActive := append(*active, *objRefAC)
+		cronJobApplyConfig.Status.Active = &newActive
 	}
 
 	/*
@@ -245,17 +268,23 @@ func (r *CronJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// kdelga: use apply instead of update
 	// does applying just a status even make sense?
+	// kdelga: toggle this and the status update to test patch vs the old way
 	//
-	//owner := "controller"
-	//if err := r.Patch(ctx, cronJobApplyConfig, client.Apply, owner); err != nil {
-	//	log.Error(err, "unable to patch CronJob")
+	// NEW:
+	var owner client.FieldOwner
+	owner = "fieldmanager"
+	if err := r.Status().Patch(ctx, cronJobApplyConfig, client.Apply, owner); err != nil {
+		log.Error(err, "unable to patch CronJob")
+		return ctrl.Result{}, err
+	} else {
+		log.Info("patch success", "last schedule time (AC)", cronJobApplyConfig.Status.LastScheduleTime, "lst (old)", cronJob.Status.LastScheduleTime)
+	}
+
+	// OLD:
+	//if err := r.Status().Update(ctx, &cronJob); err != nil {
+	//	log.Error(err, "unable to update CronJob status")
 	//	return ctrl.Result{}, err
 	//}
-
-	if err := r.Status().Update(ctx, &cronJob); err != nil {
-		log.Error(err, "unable to update CronJob status")
-		return ctrl.Result{}, err
-	}
 
 	/*
 		Once we've updated our status, we can move on to ensuring that the status of
@@ -510,6 +539,24 @@ func (r *CronJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		log.Error(err, "unable to create Job for CronJob", "job", job)
 		return ctrl.Result{}, err
 	}
+	//jobApplyConfig := &acbatchv1.JobApplyConfiguration{
+	//	TypeMeta:   job.TypeMeta,
+	//	ObjectMeta: job.ObjectMeta,
+	//	Spec: &acbatchv1.JobSpecApplyConfiguration{
+	//		Parallelism:           job.Spec.Parallelism,
+	//		Completions:           job.Spec.Completions,
+	//		ActiveDeadlineSeconds: job.Spec.ActiveDeadlineSeconds,
+	//		BackoffLimit:          job.Spec.BackoffLimit,
+	//		//Selector:
+	//		ManualSelector: job.Spec.ManualSelector,
+	//		//Template
+	//		TTLSecondsAfterFinished: job.Spec.TTLSecondsAfterFinished,
+	//	},
+	//}
+	//if err := r.Patch(ctx, jobApplyConfig, client.Apply, owner); err != nil {
+	//	log.Error(err, "unable to patch Job for CronJob", "jobApplyConfig", jobApplyConfig, "job", job)
+	//	return ctrl.Result{}, err
+	//}
 
 	log.V(1).Info("created Job for CronJob run", "job", job)
 
@@ -572,4 +619,8 @@ func (r *CronJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&batch.CronJob{}).
 		Owns(&kbatch.Job{}).
 		Complete(r)
+}
+
+func makePtrForString(s string) *string {
+	return &s
 }
